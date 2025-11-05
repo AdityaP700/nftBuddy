@@ -10,7 +10,7 @@ pub struct Cli{
 
 #[derive(Subcommand,Debug)]
 pub enum Commands{
-    unmask{
+    Unmask{
         #[arg(required=true, help="The mint address of the NFT to unmask")]
         mint_address:String,
     },

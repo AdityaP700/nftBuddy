@@ -1,10 +1,12 @@
 use reqwest::Client;
+use std::env;
 use std::time::Duration;
 
-const RPC_URL : &str = "https://api.mainnet-beta.solana.com";
-pub fn create_rpc_client()->Client{
-    Client::builder()
-    .timeout(Duration::from_secs(10))
-    .build()
-    .expect("Failed to create RPC client")
+pub fn create_rpc_client() -> (Client, String) {
+    let rpc_url = env::var("RPC_URL").unwrap_or_else(|_| "https://api.mainnet-beta.solana.com".to_string());
+    let client = Client::builder()
+        .timeout(Duration::from_secs(15))
+        .build()
+        .expect("Failed to create RPC client");
+    (client, rpc_url)
 }
