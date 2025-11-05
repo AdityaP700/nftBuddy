@@ -1,5 +1,5 @@
 use serde::Deserialize;
-use mpl_token_metadata::state::{TokenMetadataAccount, Metadata};
+use mpl_token_metadata::state::Metadata;
 #[derive(Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct RpcResponse {
