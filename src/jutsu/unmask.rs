@@ -3,11 +3,11 @@ use crate::rpc::create_rpc_client;
 use serde_json::{json, Value};
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine as _;
-use mpl_token_metadata::state::{Metadata, TokenMetadataAccount};
+use borsh::BorshDeserialize;
 use solana_sdk::pubkey::Pubkey;
 use std::str::FromStr;
-use crate::model::{OffChainMetadata,UnmaskReport};
-pub async fn run(mint_address:String)->Result<UnmaskReport>{
+use crate::model::{OffChainMetadata, UnmaskReport, Metadata};
+pub async fn run(mint_address:String, fetch_image: bool)->Result<UnmaskReport>{
 
     let (rpc_client, rpc_url) = create_rpc_client();
     // Derive the metadata PDA for the mint so we query the metadata account (where URI lives).
@@ -95,7 +95,10 @@ pub async fn run(mint_address:String)->Result<UnmaskReport>{
 
     let bytes = STANDARD.decode(base64_data)
         .map_err(|e| anyhow!("base64 decode failed: {}", e))?;
-    let metadata = Metadata::safe_deserialize(&mut bytes.as_slice())
+    
+    // Deserialize with a mutable slice reference to allow partial reads
+    let mut slice: &[u8] = &bytes;
+    let metadata = Metadata::deserialize(&mut slice)
         .map_err(|e| anyhow!("Failed to parse metadata from bytes: {}", e))?;
 
     let mut off_chain_uri = metadata.data.uri.trim_end_matches('\0').trim().to_string();
@@ -109,7 +112,7 @@ pub async fn run(mint_address:String)->Result<UnmaskReport>{
             image: String::new(),
             attributes: Vec::new(),
         };
-        let report = UnmaskReport { on_chain: metadata, off_chain: off_chain_fallback };
+        let report = UnmaskReport { on_chain: metadata, off_chain: off_chain_fallback, image_data: None };
         return Ok(report);
     }
 
@@ -131,7 +134,7 @@ pub async fn run(mint_address:String)->Result<UnmaskReport>{
             image: String::new(),
             attributes: Vec::new(),
         };
-        let report = UnmaskReport { on_chain: metadata, off_chain: off_chain_fallback };
+        let report = UnmaskReport { on_chain: metadata, off_chain: off_chain_fallback, image_data: None };
         return Ok(report);
     }
     let off_chain_response = rpc_client
@@ -141,9 +144,36 @@ pub async fn run(mint_address:String)->Result<UnmaskReport>{
         .json::<OffChainMetadata>()
         .await?;
 
+    // Optionally fetch image data if requested
+    let image_data = if fetch_image && !off_chain_response.image.is_empty() {
+        let mut img_url = off_chain_response.image.clone();
+
+        // Normalize image URL schemes
+        if img_url.starts_with("ipfs://") {
+            img_url = img_url.replace("ipfs://", "https://ipfs.io/ipfs/");
+        } else if img_url.starts_with("ar://") {
+            img_url = img_url.replacen("ar://", "https://arweave.net/", 1);
+        }
+
+        if img_url.starts_with("http://") || img_url.starts_with("https://") {
+            match rpc_client.get(&img_url).send().await {
+                Ok(resp) => match resp.bytes().await {
+                    Ok(bytes) => Some(bytes.to_vec()),
+                    Err(_) => None,
+                },
+                Err(_) => None,
+            }
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
     let report = UnmaskReport {
         on_chain: metadata,
         off_chain: off_chain_response,
+        image_data,
     };
     Ok(report)
 }
