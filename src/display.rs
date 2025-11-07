@@ -3,11 +3,50 @@ use colored::*;
 use tokio::time::{sleep, Duration};
 use viuer::Config as ViuerConfig;
 use image::io::Reader as ImageReader;
+use image::{DynamicImage, GenericImageView, imageops::FilterType};
 use std::io::Cursor;
+
+fn render_ascii(img: &DynamicImage, width: u32, colorize: bool) -> String {
+    // Character ramp from dark -> light
+    
+    const RAMP: &[u8] = b"@%#*+=-:. ";
+
+    // Maintain aspect ratio; terminal characters are taller than wide
+    // so we shrink height by a factor (~0.5) to look proportionate
+    let (w, h) = img.dimensions();
+    if w == 0 || h == 0 || width == 0 { return String::new(); }
+    let scaled_height = ((h as f32 * (width as f32 / w as f32)) * 0.5)
+        .max(1.0)
+        .round() as u32;
+
+    let small = img.resize_exact(width, scaled_height, FilterType::Triangle);
+
+    let mut out = String::new();
+    for y in 0..small.height() {
+        for x in 0..small.width() {
+            let pixel = small.get_pixel(x, y);
+            let r = pixel[0] as f32;
+            let g = pixel[1] as f32;
+            let b = pixel[2] as f32;
+            let lum = 0.299 * r + 0.587 * g + 0.114 * b;
+            let idx = ((lum / 255.0) * (RAMP.len() as f32 - 1.0))
+                .clamp(0.0, (RAMP.len() - 1) as f32) as usize;
+            let ch = RAMP[idx] as char;
+
+            if colorize {
+                // Use 24-bit truecolor if terminal supports; colored crate will do the escape
+                out.push_str(&format!("{}", ch.to_string().truecolor(r as u8, g as u8, b as u8)));
+            } else {
+                out.push(ch);
+            }
+        }
+        out.push('\n');
+    }
+    out
+}
 
 // Note: This function must now be `async` because it uses `await`.
 pub async fn print_unmask_report(report: UnmaskReport) {
-    // Solana-themed characters (Your design is perfect)
     let top_left = "╔";
     let top_right = "╗";
     let bottom_left = "╚";
@@ -29,13 +68,12 @@ pub async fn print_unmask_report(report: UnmaskReport) {
     ║    /\__/ / \_/ | |___| | | | |\  | | | |                 ║
     ║    \____/ \___/\_____\_| |_\_| \_\_| |_/                 ║
     ║                                                          ║
-    ║              🌐 NFT INTELLIGENCE REPORT 🌐              ║
+    ║                                                          ║
     ╚══════════════════════════════════════════════════════════╝
     "#;
 
     println!("{}", banner.bright_purple().bold());
-    sleep(Duration::from_millis(500)).await; // A dramatic pause
-
+    sleep(Duration::from_millis(500)).await;
     // --- HEADER WITH NEON EFFECT ---
     println!("\n{}", format!("{}{}{}", top_left, horizontal.repeat(63), top_right).bright_cyan());
     let nft_name = format!(" {} {} {}",
@@ -132,21 +170,27 @@ pub async fn print_unmask_report(report: UnmaskReport) {
         );
         println!("{}", divider);
 
-        // Try to render image as ASCII/blocks in terminal
-        match ImageReader::new(Cursor::new(image_bytes))
-            .with_guessed_format()
-        {
+        // Try to render image; prefer portable ASCII (Pixel Clone)
+        match ImageReader::new(Cursor::new(image_bytes)).with_guessed_format() {
             Ok(reader) => {
-                if let Ok(img) = reader.decode() {
-                    let conf = ViuerConfig {
-                        width: Some(60),
-                        height: Some(30),
-                        absolute_offset: false,
-                        ..Default::default()
-                    };
+                match reader.decode() {
+                    Ok(img) => {
+                        // First, print ASCII so it's always visible
+                        let ascii = render_ascii(&img, 60, true);
+                        println!("{}", ascii);
 
-                    // viuer prints to stdout
-                    let _ = viuer::print(&img, &conf);
+                        // Then, best-effort nice rendering if terminal supports it
+                        let conf = ViuerConfig {
+                            width: Some(60),
+                            height: Some(30),
+                            absolute_offset: false,
+                            ..Default::default()
+                        };
+                        let _ = viuer::print(&img, &conf);
+                    }
+                    Err(_) => {
+                        println!(" {} {}", vertical.bright_cyan(), "❌ Could not decode image".bright_red());
+                    }
                 }
             }
             Err(_) => {
