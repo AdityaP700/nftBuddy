@@ -8,7 +8,7 @@ use std::io::Cursor;
 
 fn render_ascii(img: &DynamicImage, width: u32, colorize: bool) -> String {
     // Character ramp from dark -> light
-    
+
     const RAMP: &[u8] = b"@%#*+=-:. ";
 
     // Maintain aspect ratio; terminal characters are taller than wide
